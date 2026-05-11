@@ -1,0 +1,89 @@
+# ========================
+# Dependencies
+# ========================
+node_modules/
+package-lock.json
+
+# ========================
+# Python
+# ========================
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+*.whl
+
+# ========================
+# .NET / C#
+# ========================
+bin/
+obj/
+*.dll
+*.exe
+*.pdb
+*.user
+*.suo
+*.cache
+
+# ========================
+# Build outputs
+# ========================
+dist/
+dist-ssr/
+build/
+
+# ========================
+# Large binaries (download via script)
+# ========================
+ChessAssistantRoot/brain-backend/Engine/stockfish.exe
+ChessAssistantRoot/vision-module/models/*.onnx
+
+# ========================
+# IDE / Editor
+# ========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sw?
+*.ntvs*
+*.njsproj
+*.sln
+
+# ========================
+# OS files
+# ========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ========================
+# Logs
+# ========================
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ========================
+# Environment / Secrets
+# ========================
+.env
+.env.*
+*.local
+
+# ========================
+# Agent / AI config (internal use only)
+# ========================
+.agent_config/
+AGENT_PLAN.md
+implementation_plan.md
+
+# ========================
+# Test artifacts
+# ========================
+ChessAssistantRoot/vision-module/warped_test.png
+ChessAssistantRoot/test_payload.json
