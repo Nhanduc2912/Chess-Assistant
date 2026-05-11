@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Overlay styles */
+body, html, #root {
+  margin: 0;
+  padding: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: transparent !important;
+  overflow: hidden;
+}
+
+/* SVG overlays and non-interactive divs should pass clicks through */
+.click-through {
+  pointer-events: none;
+}
