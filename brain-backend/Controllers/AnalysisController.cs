@@ -25,6 +25,9 @@ public class AnalysisController : ControllerBase
     // Latest result for REST polling (Chrome Extension)
     private static AnalysisResult? _latestResult = null;
 
+    // Flag to prevent concurrent analysis requests
+    private static bool _isAnalyzing = false;
+
     public AnalysisController(
         StockfishService stockfish,
         FenCacheService cache,
@@ -77,6 +80,8 @@ public class AnalysisController : ControllerBase
             await ChessHub.BroadcastAnalysis(_hubContext, cached);
             return Ok(cached);
         }
+
+        _isAnalyzing = true;
 
         // 4. Phân tích bằng Stockfish
         try
@@ -133,6 +138,10 @@ public class AnalysisController : ControllerBase
         {
             _logger.LogError(ex, "[AnalysisController] Error analyzing FEN: {Fen}", request.Fen);
             return StatusCode(500, new { error = "Internal server error during analysis." });
+        }
+        finally
+        {
+            _isAnalyzing = false;
         }
     }
 

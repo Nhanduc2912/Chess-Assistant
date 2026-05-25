@@ -1,48 +1,77 @@
-# ========================
-# Dependencies
-# ========================
-node_modules/
-package-lock.json
+# ===================================================
+#  CHESS REALTIME ASSISTANT - GITIGNORE (COMBINED)
+# ===================================================
 
-# ========================
-# Python
-# ========================
+# Temp PID files
+.backend.pid
+.assistant.pids
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python / Vision
 venv/
+.venv/
 __pycache__/
 *.pyc
 *.pyo
-*.egg-info/
+*.pyd
+.Python
+env/
+build/
+develop-eggs/
+downloads/
+eggs/
 .eggs/
-*.whl
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+ChessAssistantRoot/vision-module/models/*.onnx
+ChessAssistantRoot/vision-module/warped_test.png
 
-# ========================
-# .NET / C#
-# ========================
+# .NET Core / C#
+[Bb]in/
+[Oo]bj/
 bin/
 obj/
 *.dll
 *.exe
 *.pdb
-*.user
 *.suo
 *.cache
+*.user
+*.userosscache
+*.sln.docstates
 
-# ========================
-# Build outputs
-# ========================
+# Node / Frontend
+node_modules/
+package-lock.json
 dist/
 dist-ssr/
-build/
+dist-electron/
+.eslintcache
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# ========================
-# Large binaries (download via script)
-# ========================
-ChessAssistantRoot/brain-backend/Engine/stockfish.exe
-ChessAssistantRoot/vision-module/models/*.onnx
+# Environment / Secrets
+.env
+.env.*
+*.local
 
-# ========================
 # IDE / Editor
-# ========================
 .vscode/
 .idea/
 *.swp
@@ -52,38 +81,10 @@ ChessAssistantRoot/vision-module/models/*.onnx
 *.njsproj
 *.sln
 
-# ========================
-# OS files
-# ========================
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# ========================
-# Logs
-# ========================
-*.log
-logs/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# ========================
-# Environment / Secrets
-# ========================
-.env
-.env.*
-*.local
-
-# ========================
 # Agent / AI config (internal use only)
-# ========================
 .agent_config/
 AGENT_PLAN.md
 implementation_plan.md
 
-# ========================
 # Test artifacts
-# ========================
-ChessAssistantRoot/vision-module/warped_test.png
 ChessAssistantRoot/test_payload.json
