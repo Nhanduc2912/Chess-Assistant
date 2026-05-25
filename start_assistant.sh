@@ -53,10 +53,19 @@ elif [ -f "brain-backend/Engine/stockfish" ]; then
 else
     echo -e "  \e[1;33m⚠ Stockfish was not found on your system!\e[0m"
     echo -e "  Since you are on Arch Linux, we can install it for you automatically."
-    read -p "  Do you want to install Stockfish via pacman now? (y/n): " INSTALL_SF
+    read -p "  Do you want to install Stockfish now? (y/n): " INSTALL_SF
     if [[ "$INSTALL_SF" =~ ^[Yy]$ ]]; then
-        echo -e "  Running: \e[1;36msudo pacman -S stockfish\e[0m..."
-        sudo pacman -S --noconfirm stockfish
+        if command -v yay >/dev/null 2>&1; then
+            echo -e "  Found AUR helper \e[1;32myay\e[0m. Installing stockfish from AUR..."
+            yay -S stockfish
+        elif command -v paru >/dev/null 2>&1; then
+            echo -e "  Found AUR helper \e[1;32mparu\e[0m. Installing stockfish from AUR..."
+            paru -S stockfish
+        else
+            echo -e "  Running: \e[1;36msudo pacman -S stockfish\e[0m..."
+            sudo pacman -S --noconfirm stockfish
+        fi
+        
         if command -v stockfish >/dev/null 2>&1; then
             STOCKFISH_PATH=$(command -v stockfish)
             echo -e "  \e[1;32m✓ Successfully installed Stockfish at: $STOCKFISH_PATH\e[0m"
