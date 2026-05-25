@@ -52,10 +52,22 @@ elif [ -f "brain-backend/Engine/stockfish" ]; then
     echo -e "  \e[1;32m✓ Found local Stockfish at: brain-backend/$STOCKFISH_PATH\e[0m"
 else
     echo -e "  \e[1;33m⚠ Stockfish was not found on your system!\e[0m"
-    echo -e "  Please install it on Arch Linux using: \e[1;36msudo pacman -S stockfish\e[0m"
-    echo
-    read -p "  Press Enter to continue anyway (using default path /usr/bin/stockfish)..."
-    STOCKFISH_PATH="/usr/bin/stockfish"
+    echo -e "  Since you are on Arch Linux, we can install it for you automatically."
+    read -p "  Do you want to install Stockfish via pacman now? (y/n): " INSTALL_SF
+    if [[ "$INSTALL_SF" =~ ^[Yy]$ ]]; then
+        echo -e "  Running: \e[1;36msudo pacman -S stockfish\e[0m..."
+        sudo pacman -S --noconfirm stockfish
+        if command -v stockfish >/dev/null 2>&1; then
+            STOCKFISH_PATH=$(command -v stockfish)
+            echo -e "  \e[1;32m✓ Successfully installed Stockfish at: $STOCKFISH_PATH\e[0m"
+        else
+            echo -e "  \e[1;31m✗ Failed to install Stockfish. Defaulting to fallback path...\e[0m"
+            STOCKFISH_PATH="/usr/bin/stockfish"
+        fi
+    else
+        echo -e "  Continuing without installing. We will look in default path..."
+        STOCKFISH_PATH="/usr/bin/stockfish"
+    fi
 fi
 export Stockfish__EnginePath="$STOCKFISH_PATH"
 
