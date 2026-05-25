@@ -1,0 +1,11 @@
+vision:
+  fps_target: 10
+  cnn_confidence_threshold: 0.85
+  board_detection_min_area: 40000
+
+backend:
+  url: "http://localhost:5000/api/analyze"
+  timeout_seconds: 2
+
+templates:
+  theme: "chesscom_default"
