@@ -1,5 +1,7 @@
 using BrainBackend.Hubs;
+using BrainBackend.Logging;
 using BrainBackend.Services;
+using Microsoft.Extensions.Logging.Console;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -50,10 +52,20 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Logging
+// Logging — custom formatter với màu sắc và structured output
 builder.Logging.ClearProviders();
-builder.Logging.AddConsole();
+builder.Logging.AddConsole(options =>
+{
+    options.FormatterName = ChessConsoleFormatter.FormatterName;
+})
+.AddConsoleFormatter<ChessConsoleFormatter, ConsoleFormatterOptions>();
 builder.Logging.AddDebug();
+
+// Fine-tune log levels
+builder.Logging.AddFilter("Microsoft", LogLevel.Warning);
+builder.Logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Information);
+builder.Logging.AddFilter("System", LogLevel.Warning);
+builder.Logging.AddFilter("BrainBackend", LogLevel.Debug);
 
 // ──────────────────────────────────────────────
 // 2. Build app
