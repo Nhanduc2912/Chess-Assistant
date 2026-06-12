@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -28,6 +29,14 @@ public class AnalysisController : ControllerBase
     // Flag to prevent concurrent analysis requests
     private static bool _isAnalyzing = false;
 
+    // Request stats
+    private static int _totalRequests  = 0;
+    private static int _cacheHits      = 0;
+    private static int _analysisOk     = 0;
+    private static int _analysisFailed = 0;
+    private static int _busy429        = 0;
+    private static DateTime _serviceStart = DateTime.UtcNow;
+
     public AnalysisController(
         StockfishService stockfish,
         FenCacheService cache,
@@ -48,23 +57,55 @@ public class AnalysisController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Analyze([FromBody] AnalysisRequest request)
     {
+        var sw = Stopwatch.StartNew();
+        Interlocked.Increment(ref _totalRequests);
+
+        _logger.LogDebug(
+            "[AnalysisController] → Request #{Req} | FEN: {Fen}",
+            _totalRequests, request.Fen);
+
         // 1. Validate FEN cơ bản (syntax check đơn giản)
         if (!IsValidFen(request.Fen))
         {
-            _logger.LogWarning("[AnalysisController] Invalid FEN received: {Fen}", request.Fen);
+            _logger.LogWarning(
+                "[AnalysisController] ✗ Invalid FEN received" +
+                "\n  → FEN: {Fen}" +
+                "\n  → Rejected at validation",
+                request.Fen);
             return BadRequest(new { error = "Invalid FEN string." });
         }
 
         // 2. Kiểm tra Stockfish status
+        if (_stockfish.IsRestarting)
+        {
+            // Engine đang restart — không phải lỗi cố định, client nên retry
+            _logger.LogDebug(
+                "[AnalysisController] ⏳ Engine RESTARTING — 503 (transient)" +
+                "\n  → FEN: {Fen}" +
+                "\n  → Client should retry in ~1-2s",
+                request.Fen);
+            return StatusCode(503, new { error = "Engine is restarting, retry shortly.", restarting = true });
+        }
+
         if (!_stockfish.IsAlive)
         {
-            _logger.LogError("[AnalysisController] Stockfish is not running for FEN: {Fen}", request.Fen);
-            return StatusCode(503, new { error = "Stockfish engine is unavailable." });
+            Interlocked.Increment(ref _analysisFailed);
+            _logger.LogError(
+                "[AnalysisController] ✗ Engine DEAD (not restarting)" +
+                "\n  → FEN: {Fen}" +
+                "\n  → Engine process is not running and is not auto-restarting",
+                request.Fen);
+            return StatusCode(503, new { error = "Stockfish engine is unavailable.", restarting = false });
         }
 
         // 2b. Skip if already analyzing (prevents Stockfish pipe saturation)
         if (_isAnalyzing)
         {
+            Interlocked.Increment(ref _busy429);
+            _logger.LogDebug(
+                "[AnalysisController] ⚡ 429 Busy — engine occupied, rejecting request" +
+                "\n  → FEN: {Fen} | Total busy rejections: {Busy}",
+                request.Fen, _busy429);
             return StatusCode(429, new { status = "busy", message = "Analysis in progress, retry shortly." });
         }
 
@@ -72,11 +113,16 @@ public class AnalysisController : ControllerBase
         var fenHash = ComputeSha256(request.Fen);
         if (_cache.TryGet(fenHash, out var cached) && cached != null)
         {
-            _logger.LogInformation("[AnalysisController] Cache HIT for FEN hash: {Hash}", fenHash[..8]);
+            Interlocked.Increment(ref _cacheHits);
+            _logger.LogInformation(
+                "[AnalysisController] ⚡ Cache HIT | Hash={Hash} | Class={Class} | Score={Score} | Elapsed={Elapsed}ms | HitRate={Rate:P0}",
+                fenHash[..8], cached.Classification, cached.Evaluation,
+                sw.ElapsedMilliseconds,
+                _totalRequests > 0 ? (double)_cacheHits / _totalRequests : 0);
             // Relay bbox và orientation mới nhất
             cached.Bbox = request.Bbox;
             cached.IsWhiteBottom = request.IsWhiteBottom;
-            _latestResult = cached; // update for polling (backward compatibility)
+            _latestResult = cached;
             await ChessHub.BroadcastAnalysis(_hubContext, cached);
             return Ok(cached);
         }
@@ -90,7 +136,15 @@ public class AnalysisController : ControllerBase
 
             if (moves == null || moves.Count == 0)
             {
-                _logger.LogError("[AnalysisController] Stockfish timeout on FEN: {Fen}", request.Fen);
+                Interlocked.Increment(ref _analysisFailed);
+                _logger.LogError(
+                    "[AnalysisController] ✗ Analysis FAILED — no results returned" +
+                    "\n  → FEN: {Fen}" +
+                    "\n  → Elapsed: {Elapsed}ms" +
+                    "\n  → Engine alive: {Alive}" +
+                    "\n  → Possible causes: timeout, stream error, engine crash" +
+                    "\n  → Failed requests total: {Failed}",
+                    request.Fen, sw.ElapsedMilliseconds, _stockfish.IsAlive, _analysisFailed);
                 return StatusCode(500, new { error = "Stockfish analysis failed or timed out." });
             }
 
@@ -128,15 +182,24 @@ public class AnalysisController : ControllerBase
             // 7. Broadcast qua SignalR
             await ChessHub.BroadcastAnalysis(_hubContext, result);
 
+            Interlocked.Increment(ref _analysisOk);
             _logger.LogInformation(
-                "[AnalysisController] Analysis done. Score={Score}, Class={Class}, Moves={Count}",
-                currentScore, classification, moves.Count);
+                "[AnalysisController] ✓ Analysis OK | Score={Score} | Class={Class} | BestMove={Move} | PVs={Count} | Elapsed={Elapsed}ms | Total={Total} | CacheHit%={Rate:P0}",
+                currentScore, classification, moves[0].Move, moves.Count,
+                sw.ElapsedMilliseconds, _analysisOk,
+                _totalRequests > 0 ? (double)_cacheHits / _totalRequests : 0);
 
             return Ok(result);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[AnalysisController] Error analyzing FEN: {Fen}", request.Fen);
+            Interlocked.Increment(ref _analysisFailed);
+            _logger.LogError(ex,
+                "[AnalysisController] ✗ Unhandled exception during analysis" +
+                "\n  → FEN: {Fen}" +
+                "\n  → Elapsed: {Elapsed}ms" +
+                "\n  → Engine alive: {Alive}",
+                request.Fen, sw.ElapsedMilliseconds, _stockfish.IsAlive);
             return StatusCode(500, new { error = "Internal server error during analysis." });
         }
         finally
@@ -149,11 +212,59 @@ public class AnalysisController : ControllerBase
     [HttpGet("status")]
     public IActionResult Status()
     {
+        var uptime = DateTime.UtcNow - _serviceStart;
         return Ok(new
         {
             stockfishAlive = _stockfish.IsAlive,
-            cacheEntries = _cache.Count,
-            timestamp = DateTime.UtcNow
+            cacheEntries   = _cache.Count,
+            timestamp      = DateTime.UtcNow,
+            uptime         = uptime.ToString(@"hh\:mm\:ss"),
+            requests = new
+            {
+                total    = _totalRequests,
+                ok       = _analysisOk,
+                failed   = _analysisFailed,
+                cacheHit = _cacheHits,
+                busy429  = _busy429,
+                cacheHitRate = _totalRequests > 0
+                    ? Math.Round((double)_cacheHits / _totalRequests * 100, 1)
+                    : 0.0
+            }
+        });
+    }
+
+    /// <summary>GET /api/analyze/diagnostics — Deep engine diagnostics</summary>
+    [HttpGet("diagnostics")]
+    public IActionResult Diagnostics()
+    {
+        var uptime = DateTime.UtcNow - _serviceStart;
+        _logger.LogDebug("[AnalysisController] Diagnostics requested");
+        return Ok(new
+        {
+            service = new
+            {
+                uptime         = uptime.ToString(@"hh\:mm\:ss"),
+                uptimeSeconds  = (int)uptime.TotalSeconds,
+                startedAt      = _serviceStart,
+                lastAnalysis   = _latestResult?.Classification,
+            },
+            requests = new
+            {
+                total          = _totalRequests,
+                analysisOk     = _analysisOk,
+                analysisFailed = _analysisFailed,
+                cacheHits      = _cacheHits,
+                busy429        = _busy429,
+                cacheHitPct    = _totalRequests > 0
+                    ? Math.Round((double)_cacheHits / _totalRequests * 100, 1)
+                    : 0.0,
+                successPct     = _totalRequests > 0
+                    ? Math.Round((double)_analysisOk / _totalRequests * 100, 1)
+                    : 0.0
+            },
+            engine     = _stockfish.GetDiagnostics(),
+            cache      = new { entries = _cache.Count },
+            timestamp  = DateTime.UtcNow
         });
     }
 
@@ -170,11 +281,16 @@ public class AnalysisController : ControllerBase
     [HttpPost("reset")]
     public IActionResult Reset()
     {
+        var prevStats = new { _analysisOk, _analysisFailed, _cacheHits, _totalRequests };
         _lastScore     = 0;
         _latestResult  = null;
         _isAnalyzing   = false;
         _cache.Clear();
-        _logger.LogInformation("[AnalysisController] Game state reset (new game detected).");
+        _logger.LogInformation(
+            "[AnalysisController] ↺ Game state RESET" +
+            "\n  → Previous game stats: Requests={Req} | OK={Ok} | Failed={Fail} | CacheHit={Cache}",
+            prevStats._totalRequests, prevStats._analysisOk,
+            prevStats._analysisFailed, prevStats._cacheHits);
         return Ok(new { status = "reset" });
     }
 
