@@ -23,6 +23,18 @@ public class StockfishService : IDisposable
     private StreamReader? _stdout;
     private bool _disposed;
 
+    // Guards concurrent restart vs analysis: startup MUST hold _lock so that
+    // AnalyzeInternal() cannot read _stdout while StartProcess() is consuming it.
+    // Volatile so IsAlive check sees latest state across threads.
+    private volatile bool _isRestarting = false;
+
+    // Thống kê runtime
+    private int _restartCount = 0;
+    private int _totalAnalyzed = 0;
+    private int _totalErrors = 0;
+    private int _totalCancelled = 0;
+    private DateTime _startedAt;
+
     // Config
     private readonly int _multiPv;
     private readonly int _depth;
@@ -31,22 +43,31 @@ public class StockfishService : IDisposable
     private readonly int _timeoutMs;
     private readonly string _enginePath;
 
-    public bool IsAlive => _process is { HasExited: false };
+    public bool IsAlive      => _process is { HasExited: false } && !_isRestarting;
+    public bool IsRestarting  => _isRestarting;
 
     public StockfishService(IConfiguration config, ILogger<StockfishService> logger)
     {
         _config = config;
         _logger = logger;
 
-        _multiPv = config.GetValue("Stockfish:MultiPV", 3);
-        _depth = config.GetValue("Stockfish:Depth", 15);
-        _threads = config.GetValue("Stockfish:Threads", 2);
-        _hashMb = config.GetValue("Stockfish:HashMB", 128);
-        _timeoutMs = config.GetValue("Stockfish:TimeoutMs", 8000);
-        _enginePath = config.GetValue("Stockfish:EnginePath", "Engine/stockfish.exe")!;
+        _multiPv     = config.GetValue("Stockfish:MultiPV", 3);
+        _depth       = config.GetValue("Stockfish:Depth", 15);
+        _threads     = config.GetValue("Stockfish:Threads", 2);
+        _hashMb      = config.GetValue("Stockfish:HashMB", 128);
+        _timeoutMs   = config.GetValue("Stockfish:TimeoutMs", 8000);
+        _enginePath  = config.GetValue("Stockfish:EnginePath", "Engine/stockfish.exe")!;
+
+        _logger.LogInformation(
+            "[StockfishService] Initializing with config → MultiPV={MultiPV} | Depth={Depth} | Threads={Threads} | Hash={Hash}MB | Timeout={Timeout}ms",
+            _multiPv, _depth, _threads, _hashMb, _timeoutMs);
 
         StartProcess();
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Process lifecycle
+    // ─────────────────────────────────────────────────────────────────────────
 
     private void StartProcess()
     {
@@ -58,29 +79,37 @@ public class StockfishService : IDisposable
 
             if (!File.Exists(exePath))
             {
-                _logger.LogCritical("[StockfishService] Stockfish binary not found at: {Path}", exePath);
+                _logger.LogCritical(
+                    "[StockfishService] ✗ Engine binary NOT FOUND at: {Path}" +
+                    "\n  → Check 'Stockfish:EnginePath' in appsettings.json" +
+                    "\n  → BaseDir: {Base}",
+                    exePath, AppContext.BaseDirectory);
                 return;
             }
 
+            _logger.LogDebug("[StockfishService] Starting engine: {Path}", exePath);
+
             var psi = new ProcessStartInfo
             {
-                FileName = exePath,
-                UseShellExecute = false,
-                RedirectStandardInput = true,
+                FileName             = exePath,
+                UseShellExecute      = false,
+                RedirectStandardInput  = true,
                 RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
+                RedirectStandardError  = true,
+                CreateNoWindow       = true
             };
 
             _process = new Process { StartInfo = psi };
             _process.Exited += OnProcessExited;
             _process.EnableRaisingEvents = true;
             _process.Start();
+            _startedAt = DateTime.UtcNow;
 
-            _stdin = _process.StandardInput;
+            _stdin  = _process.StandardInput;
             _stdout = _process.StandardOutput;
 
             // UCI handshake
+            _logger.LogDebug("[StockfishService] UCI handshake in progress...");
             SendCommand("uci");
             WaitForResponse("uciok", 3000);
             SendCommand($"setoption name MultiPV value {_multiPv}");
@@ -89,26 +118,79 @@ public class StockfishService : IDisposable
             SendCommand("isready");
             WaitForResponse("readyok", 3000);
 
-            _logger.LogInformation("[StockfishService] Stockfish started. MultiPV={MultiPV}, Depth={Depth}, Threads={Threads}",
-                _multiPv, _depth, _threads);
+            _logger.LogInformation(
+                "[StockfishService] ✓ Engine READY — PID={PID} | MultiPV={MultiPV} | Depth={Depth} | Threads={Threads} | Hash={Hash}MB | Timeout={Timeout}ms | Restart#{Restart}",
+                _process.Id, _multiPv, _depth, _threads, _hashMb, _timeoutMs, _restartCount);
         }
         catch (Exception ex)
         {
-            _logger.LogCritical(ex, "[StockfishService] Failed to start Stockfish.");
+            _logger.LogCritical(ex,
+                "[StockfishService] ✗ FAILED to start Stockfish engine" +
+                "\n  → EnginePath: {Path}" +
+                "\n  → This will cause all analysis requests to fail",
+                _enginePath);
         }
     }
 
     private void OnProcessExited(object? sender, EventArgs e)
     {
-        _logger.LogCritical("[StockfishService] Stockfish process died, restarting...");
-        Thread.Sleep(1000);
-        StartProcess();
+        if (_disposed) return;
+
+        var uptime = DateTime.UtcNow - _startedAt;
+        _restartCount++;
+        _isRestarting = true;
+
+        // Cancel any in-flight analysis so AnalyzeInternal returns fast and releases _lock
+        _currentCts?.Cancel();
+
+        _logger.LogCritical(
+            "[StockfishService] ✗ Engine process DIED unexpectedly" +
+            "\n  → ExitCode: {ExitCode}" +
+            "\n  → Uptime: {Uptime:hh\\:mm\\:ss}" +
+            "\n  → Restart attempt: #{Restart}" +
+            "\n  → Stats: Analyzed={Analyzed} | Errors={Errors} | Cancelled={Cancelled}" +
+            "\n  → Waiting for lock before restart...",
+            _process?.ExitCode, uptime, _restartCount,
+            _totalAnalyzed, _totalErrors, _totalCancelled);
+
+        // ─── CRITICAL FIX ─────────────────────────────────────────────────────
+        // Acquire the analysis lock BEFORE StartProcess().
+        // StartProcess() reads from _stdout (UCI handshake) via WaitForResponse().
+        // AnalyzeInternal() ALSO reads from _stdout (readyok wait + search loop).
+        // StreamReader is NOT thread-safe — concurrent reads cause ArgumentOutOfRangeException.
+        // Holding _lock here ensures StartProcess() and AnalyzeInternal() never
+        // read _stdout at the same time.
+        // ─────────────────────────────────────────────────────────────────────
+        _lock.Wait(); // blocking — wait for any in-flight AnalyzeInternal to finish
+        try
+        {
+            Thread.Sleep(500); // brief pause before restarting
+            StartProcess();
+        }
+        finally
+        {
+            _isRestarting = false;
+            _lock.Release();
+            _logger.LogInformation(
+                "[StockfishService] Lock released after restart — engine ready for new requests");
+        }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // I/O helpers
+    // ─────────────────────────────────────────────────────────────────────────
 
     private void SendCommand(string cmd)
     {
-        _stdin?.WriteLine(cmd);
-        _stdin?.Flush();
+        try
+        {
+            _stdin?.WriteLine(cmd);
+            _stdin?.Flush();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[StockfishService] Failed to send command '{Cmd}' — pipe may be closed", cmd);
+        }
     }
 
     private void WaitForResponse(string token, int timeoutMs)
@@ -117,10 +199,22 @@ public class StockfishService : IDisposable
         var sw = Stopwatch.StartNew();
         while (sw.ElapsedMilliseconds < timeoutMs)
         {
-            var line = _stdout.ReadLine();
-            if (line != null && line.Contains(token)) return;
+            try
+            {
+                var line = _stdout.ReadLine();
+                if (line == null) break; // stream closed
+                if (line.Contains(token)) return;
+            }
+            catch
+            {
+                break;
+            }
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Public analysis API
+    // ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Phân tích FEN, trả về list MoveInfo (MultiPV).
@@ -130,7 +224,10 @@ public class StockfishService : IDisposable
     {
         if (!IsAlive)
         {
-            _logger.LogError("[StockfishService] Stockfish is not running.");
+            _logger.LogError(
+                "[StockfishService] ✗ Engine NOT RUNNING — cannot analyze FEN: {Fen}" +
+                "\n  → IsAlive={Alive} | RestartCount={Restart}",
+                fen, IsAlive, _restartCount);
             return null;
         }
 
@@ -142,7 +239,11 @@ public class StockfishService : IDisposable
         await _lock.WaitAsync(ct);
         try
         {
-            if (linkedCt.IsCancellationRequested) return null;
+            if (linkedCt.IsCancellationRequested)
+            {
+                Interlocked.Increment(ref _totalCancelled);
+                return null;
+            }
             return await Task.Run(() => AnalyzeInternal(fen, linkedCt), linkedCt);
         }
         finally
@@ -153,56 +254,99 @@ public class StockfishService : IDisposable
 
     private List<MoveInfo>? AnalyzeInternal(string fen, CancellationToken ct)
     {
-        if (_stdout == null || _stdin == null) return null;
+        if (_stdout == null || _stdin == null)
+        {
+            _logger.LogError("[StockfishService] ✗ Streams are null — engine not initialized properly");
+            return null;
+        }
+
+        var sw = Stopwatch.StartNew();
 
         try
         {
-            // The semaphore guarantees no concurrent searches.
-            // Previous search completed (received bestmove) before lock was released.
-            // So stdout is clean — no need to send "stop".
-            // Just sync with "isready" to be absolutely sure.
+            // Sync with isready before sending position
             SendCommand("isready");
 
-            // Wait for readyok (with timeout via async ReadLine)
+            // Wait for readyok (with timeout)
             var readySw = Stopwatch.StartNew();
             while (readySw.ElapsedMilliseconds < 1000)
             {
                 if (ct.IsCancellationRequested) return null;
-                var readTask = Task.Run(() => _stdout!.ReadLine());
-                if (readTask.Wait(TimeSpan.FromMilliseconds(1000 - readySw.ElapsedMilliseconds)))
+
+                string? readLine = null;
+                try
                 {
-                    var line = readTask.Result;
-                    if (line == null) break;
-                    if (line.StartsWith("readyok")) break;
+                    var readTask = Task.Run(() => _stdout!.ReadLine());
+                    if (readTask.Wait(TimeSpan.FromMilliseconds(1000 - readySw.ElapsedMilliseconds)))
+                    {
+                        readLine = readTask.Result;
+                    }
                 }
-                else break; // timeout
+                catch (AggregateException aex) when (aex.InnerException is ArgumentOutOfRangeException or ObjectDisposedException or InvalidOperationException)
+                {
+                    _logger.LogWarning(
+                        "[StockfishService] Stream read failed during readyok wait — engine likely died" +
+                        "\n  → FEN: {Fen}" +
+                        "\n  → Cause: {Cause}",
+                        fen, aex.InnerException.GetType().Name);
+                    return null;
+                }
+
+                if (readLine == null) break;
+                if (readLine.StartsWith("readyok")) break;
             }
 
             // Start search
             SendCommand($"position fen {fen}");
-            // Use movetime for consistent speed. 600ms is a good balance.
-            SendCommand($"go movetime 600");
+            SendCommand("go movetime 600");
 
-            var results = new Dictionary<int, MoveInfo>();
-            var sw = Stopwatch.StartNew();
+            _logger.LogDebug(
+                "[StockfishService] → Search started | FEN: {Fen} | movetime=600ms | timeout={Timeout}ms",
+                fen, _timeoutMs);
 
-            while (sw.ElapsedMilliseconds < _timeoutMs && !ct.IsCancellationRequested)
+            var results   = new Dictionary<int, MoveInfo>();
+            var searchSw  = Stopwatch.StartNew();
+
+            while (searchSw.ElapsedMilliseconds < _timeoutMs && !ct.IsCancellationRequested)
             {
-                // Use async ReadLine with timeout to prevent permanent blocking
-                var readTask = Task.Run(() => _stdout!.ReadLine());
-                var remaining = _timeoutMs - (int)sw.ElapsedMilliseconds;
+                string? line = null;
+                var remaining = _timeoutMs - (int)searchSw.ElapsedMilliseconds;
                 if (remaining <= 0) break;
 
-                if (!readTask.Wait(TimeSpan.FromMilliseconds(remaining)))
+                try
                 {
-                    // Timeout — send stop to unblock Stockfish
-                    SendCommand("stop");
-                    // Try to read the bestmove response (max 500ms)
-                    readTask.Wait(TimeSpan.FromMilliseconds(500));
-                    break;
+                    var readTask = Task.Run(() => _stdout!.ReadLine());
+                    if (!readTask.Wait(TimeSpan.FromMilliseconds(remaining)))
+                    {
+                        // Timeout — send stop
+                        _logger.LogWarning(
+                            "[StockfishService] ⚠ Search timeout reached ({Timeout}ms) for FEN: {Fen}" +
+                            "\n  → Sending stop, partial results: {Count} PVs found",
+                            _timeoutMs, fen, results.Count);
+                        SendCommand("stop");
+                        readTask.Wait(TimeSpan.FromMilliseconds(500));
+                        break;
+                    }
+                    line = readTask.Result;
+                }
+                catch (AggregateException aex) when (aex.InnerException is ArgumentOutOfRangeException
+                                                   or ObjectDisposedException
+                                                   or InvalidOperationException)
+                {
+                    // Stockfish process died mid-read — stream is disposed
+                    Interlocked.Increment(ref _totalErrors);
+                    _logger.LogError(
+                        "[StockfishService] ✗ Stream closed mid-analysis (engine died)" +
+                        "\n  → FEN: {Fen}" +
+                        "\n  → Elapsed: {Elapsed}ms" +
+                        "\n  → Partial results: {Count} PVs" +
+                        "\n  → Exception: {ExType}: {ExMsg}" +
+                        "\n  → The engine will be restarted automatically by OnProcessExited",
+                        fen, searchSw.ElapsedMilliseconds, results.Count,
+                        aex.InnerException.GetType().Name, aex.InnerException.Message);
+                    return null;
                 }
 
-                var line = readTask.Result;
                 if (line == null) break;
                 if (line.StartsWith("bestmove")) break;
                 if (!line.StartsWith("info") || !line.Contains("multipv")) continue;
@@ -222,21 +366,54 @@ public class StockfishService : IDisposable
 
             if (ct.IsCancellationRequested)
             {
+                Interlocked.Increment(ref _totalCancelled);
                 SendCommand("stop");
-                _stdout.ReadLine(); // consume bestmove
+                try { _stdout.ReadLine(); } catch { /* consume bestmove, ignore errors */ }
+                _logger.LogDebug(
+                    "[StockfishService] Analysis cancelled for FEN: {Fen} after {Elapsed}ms",
+                    fen, sw.ElapsedMilliseconds);
                 return null;
             }
 
-            return results.Count > 0
-                ? results.OrderBy(kv => kv.Key).Select(kv => kv.Value).ToList()
-                : null;
+            if (results.Count == 0)
+            {
+                Interlocked.Increment(ref _totalErrors);
+                _logger.LogWarning(
+                    "[StockfishService] ⚠ No results returned for FEN: {Fen}" +
+                    "\n  → Elapsed: {Elapsed}ms | Engine alive: {Alive}" +
+                    "\n  → This may indicate an invalid position or stream issue",
+                    fen, sw.ElapsedMilliseconds, IsAlive);
+                return null;
+            }
+
+            Interlocked.Increment(ref _totalAnalyzed);
+            var ordered = results.OrderBy(kv => kv.Key).Select(kv => kv.Value).ToList();
+
+            _logger.LogDebug(
+                "[StockfishService] ✓ Analysis complete | Elapsed={Elapsed}ms | PVs={Count} | Best: {Move} (Score={Score}, Depth={Depth}) | Total analyzed: {Total}",
+                sw.ElapsedMilliseconds, ordered.Count,
+                ordered[0].Move, ordered[0].Score, ordered[0].Depth,
+                _totalAnalyzed);
+
+            return ordered;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[StockfishService] Error during analysis of FEN: {Fen}", fen);
+            Interlocked.Increment(ref _totalErrors);
+            _logger.LogError(ex,
+                "[StockfishService] ✗ Unexpected error during analysis" +
+                "\n  → FEN: {Fen}" +
+                "\n  → Elapsed: {Elapsed}ms" +
+                "\n  → Engine alive: {Alive}" +
+                "\n  → Total errors so far: {Errors}",
+                fen, sw.ElapsedMilliseconds, IsAlive, _totalErrors);
             return null;
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Parsing helpers (unchanged)
+    // ─────────────────────────────────────────────────────────────────────────
 
     private static int ParseInt(string line, string token)
     {
@@ -250,7 +427,6 @@ public class StockfishService : IDisposable
 
     private static int ParseScore(string line)
     {
-        // "score cp 45" hoặc "score mate 3"
         var cpIdx = line.IndexOf("score cp", StringComparison.Ordinal);
         if (cpIdx >= 0)
         {
@@ -267,7 +443,7 @@ public class StockfishService : IDisposable
             var end = rest.IndexOf(' ');
             var numStr = end < 0 ? rest : rest[..end];
             if (int.TryParse(numStr, out var mate))
-                return mate > 0 ? 30000 : -30000; // đại diện cho mate
+                return mate > 0 ? 30000 : -30000;
         }
 
         return 0;
@@ -275,7 +451,6 @@ public class StockfishService : IDisposable
 
     private static string? ParseFirstMove(string line)
     {
-        // " pv e2e4 d7d5 ..." → "e2e4"
         var pvIdx = line.IndexOf(" pv ", StringComparison.Ordinal);
         if (pvIdx < 0) return null;
         var rest = line[(pvIdx + 4)..].TrimStart();
@@ -283,10 +458,46 @@ public class StockfishService : IDisposable
         return end < 0 ? rest : rest[..end];
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Diagnostics
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Trả về snapshot trạng thái engine cho health check.</summary>
+    public object GetDiagnostics() => new
+    {
+        alive        = IsAlive,
+        restarting   = IsRestarting,
+        pid          = _process?.Id,
+        uptime       = (DateTime.UtcNow - _startedAt).ToString(@"hh\:mm\:ss"),
+        restartCount = _restartCount,
+        stats        = new
+        {
+            analyzed  = _totalAnalyzed,
+            errors    = _totalErrors,
+            cancelled = _totalCancelled,
+        },
+        config = new
+        {
+            multiPv   = _multiPv,
+            depth     = _depth,
+            threads   = _threads,
+            hashMb    = _hashMb,
+            timeoutMs = _timeoutMs,
+        }
+    };
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Dispose
+    // ─────────────────────────────────────────────────────────────────────────
+
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+
+        _logger.LogInformation(
+            "[StockfishService] Shutting down — Stats: Analyzed={Analyzed} | Errors={Errors} | Cancelled={Cancelled} | Restarts={Restarts}",
+            _totalAnalyzed, _totalErrors, _totalCancelled, _restartCount);
 
         try
         {
