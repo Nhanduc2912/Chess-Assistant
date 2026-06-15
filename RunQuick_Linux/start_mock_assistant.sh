@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
 
 # ===================================================
-#  CHESS REALTIME ASSISTANT v2.0 - STARTUP SCRIPT
+#  CHESS REALTIME ASSISTANT v2.0 - MOCK STARTUP SCRIPT
 # ===================================================
 
 clear
 
 echo -e "\e[1;35m===================================================\e[0m"
-echo -e "\e[1;36m  CHESS REALTIME ASSISTANT - FULL STARTUP SCRIPT\e[0m"
+echo -e "\e[1;36m  CHESS REALTIME ASSISTANT - MOCK STARTUP SCRIPT\e[0m"
 echo -e "\e[1;35m===================================================\e[0m"
 echo
 
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." &> /dev/null && pwd )"
 cd "$SCRIPT_DIR"
 
-# File to store PIDs of started processes
 PID_FILE=".assistant.pids"
 rm -f "$PID_FILE"
 
@@ -86,11 +85,11 @@ pkill -f "dotnet run.*brain-backend" >/dev/null 2>&1
 pkill -f "brain-backend.*dll" >/dev/null 2>&1
 pkill -f "stockfish" >/dev/null 2>&1
 pkill -f "node.*overlay-ui" >/dev/null 2>&1
-pkill -f "electron.*overlay-ui" >/dev/null 2>&1
-pkill -f "python.*main.py" >/dev/null 2>&1
+pkill -f "vite.*overlay-ui" >/dev/null 2>&1
+pkill -f "python.*mock_vision.py" >/dev/null 2>&1
 sleep 1
 
-echo -e "\e[1;34m[4/4] Starting all services in background...\e[0m"
+echo -e "\e[1;34m[4/4] Starting MOCK services in background...\e[0m"
 echo -e "  Outputs will be prefixed with service names."
 echo -e "  Press \e[1;31m[Ctrl+C]\e[0m at any time to shut down all services cleanly."
 echo -e "\e[1;35m---------------------------------------------------\e[0m"
@@ -118,32 +117,32 @@ cd ..
 sleep 4
 
 # B. Start Overlay UI
-echo -e "\e[1;36m[Startup] Launching Overlay UI (npm start)...\e[0m"
+echo -e "\e[1;36m[Startup] Launching MOCK Overlay UI (npm run dev)...\e[0m"
 cd overlay-ui
-run_with_prefix "[Overlay UI]" "\e[1;36m" npm start &
+run_with_prefix "[Overlay UI]" "\e[1;36m" npm run dev &
 UI_PID=$!
 echo $UI_PID >> "../$PID_FILE"
 cd ..
 
 sleep 2
 
-# C. Start Vision Module
-echo -e "\e[1;35m[Startup] Launching Vision Module (python main.py)...\e[0m"
+# C. Start Mock Vision Module
+echo -e "\e[1;35m[Startup] Launching MOCK Vision Module (python mock_vision.py)...\e[0m"
 cd vision-module
-run_with_prefix "[Vision]" "\e[1;35m" ./venv/bin/python main.py &
+run_with_prefix "[Mock Vision]" "\e[1;35m" ./venv/bin/python mock_vision.py &
 VISION_PID=$!
 echo $VISION_PID >> "../$PID_FILE"
 cd ..
 
-echo -e "\e[1;32m✓ All services running successfully!\e[0m"
-echo -e "  - \e[1;32mBrain Backend PID: $BACKEND_PID\e[0m"
-echo -e "  - \e[1;36mOverlay UI PID:    $UI_PID\e[0m"
-echo -e "  - \e[1;35mVision Module PID: $VISION_PID\e[0m"
+echo -e "\e[1;32m✓ All MOCK services running successfully!\e[0m"
+echo -e "  - \e[1;32mBrain Backend PID:  $BACKEND_PID\e[0m"
+echo -e "  - \e[1;36mMock Overlay UI PID: $UI_PID\e[0m"
+echo -e "  - \e[1;35mMock Vision PID:     $VISION_PID\e[0m"
 echo -e "\e[1;35m===================================================\e[0m"
 
 # Graceful cleanup trap
 cleanup() {
-    echo -e "\n\e[1;31mShutting down all services...\e[0m"
+    echo -e "\n\e[1;31mShutting down all MOCK services...\e[0m"
     
     # Kill process trees
     pkill -P $BACKEND_PID >/dev/null 2>&1
@@ -160,8 +159,8 @@ cleanup() {
     pkill -f "brain-backend.*dll" >/dev/null 2>&1
     pkill -f "stockfish" >/dev/null 2>&1
     pkill -f "node.*overlay-ui" >/dev/null 2>&1
-    pkill -f "electron.*overlay-ui" >/dev/null 2>&1
-    pkill -f "python.*main.py" >/dev/null 2>&1
+    pkill -f "vite.*overlay-ui" >/dev/null 2>&1
+    pkill -f "python.*mock_vision.py" >/dev/null 2>&1
     
     rm -f "$PID_FILE"
     echo -e "\e[1;32m✓ Shutdown complete. All processes terminated.\e[0m"

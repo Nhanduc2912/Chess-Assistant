@@ -11,7 +11,7 @@ echo -e "\e[1;31m  CHESS REALTIME ASSISTANT - SHUTDOWN SCRIPT\e[0m"
 echo -e "\e[1;35m===================================================\e[0m"
 echo
 
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." &> /dev/null && pwd )"
 cd "$SCRIPT_DIR"
 
 PID_FILE=".assistant.pids"

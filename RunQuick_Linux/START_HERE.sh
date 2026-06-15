@@ -12,8 +12,8 @@ echo -e "\e[1;36m  CHESS REALTIME ASSISTANT v2.0 (Linux Arch Edition)\e[0m"
 echo -e "\e[1;35m===================================================\e[0m"
 echo
 
-# Get the script directory
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+# Get the script directory (project root)
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." &> /dev/null && pwd )"
 cd "$SCRIPT_DIR"
 
 # Clean old processes safely
