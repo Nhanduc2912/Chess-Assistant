@@ -60,14 +60,17 @@ function getBoard() {
 
   // Try multiple selectors in priority order
   const board = document.querySelector('wc-chess-board') ||
-                document.querySelector('chess-board');
+                document.querySelector('chess-board') ||
+                document.querySelector('cg-board');
   if (board) {
     _cachedBoard = board;
     return board;
   }
 
-  // Last resort: .board div (but NOT ideal — no flipped class)
-  return document.querySelector('.board');
+  // Last resort: .board div, .cg-wrap, etc.
+  return document.querySelector('.board') || 
+         document.querySelector('.cg-wrap') || 
+         document.querySelector('#board-layout-main');
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -79,10 +82,12 @@ function isBoardFlipped() {
   const board = getBoard();
   if (!board) return false;
 
-  // Walk up the DOM tree — 'flipped' may be on a parent
+  // Walk up the DOM tree — 'flipped' or Lichess orientation class may be on a parent
   let el = board;
   while (el && el !== document.body) {
-    if (el.classList?.contains('flipped')) return true;
+    if (el.classList?.contains('flipped') || 
+        el.classList?.contains('orientation-black') || 
+        el.className?.includes('orientation-black')) return true;
     el = el.parentElement;
   }
 
@@ -96,6 +101,10 @@ function getPlyCount() {
   // Method 1: [data-ply] elements (live games)
   const plyEls = document.querySelectorAll('[data-ply]');
   if (plyEls.length > 0) return plyEls.length;
+
+  // Method 1.5: Lichess move list elements (rml d, lila-move-list move, rml move)
+  const lichessMoves = document.querySelectorAll('rml d, lila-move-list move, .moves u, .moves m');
+  if (lichessMoves.length > 0) return lichessMoves.length;
 
   // Method 2: .node elements in move list (bot games)
   const nodes = document.querySelectorAll('.move-list .node, .play-controller-scrollable .node');
@@ -171,31 +180,65 @@ function readBoard() {
   const boardEl = getBoard();
   if (!boardEl) return null;
 
-  const root   = boardEl.shadowRoot || boardEl;
-  const pieces = root.querySelectorAll('[class*="piece "]');
+  const root = boardEl.shadowRoot || boardEl;
+  
+  // Robust query for pieces: Chess.com uses .piece or class containing piece; Lichess uses <piece> tag
+  const pieces = root.querySelectorAll('.piece, piece, [class*="piece"]');
   if (!pieces.length) return null;
 
   const grid = Array.from({length:8}, () => Array(8).fill('.'));
   let placed = 0;
 
   pieces.forEach(el => {
-    const parts = (el.className || '').split(/\s+/);
-    const piece = parts.find(p => PIECE_MAP[p]);
-    const sqCls = parts.find(p => p.startsWith('square-'));
-    if (!piece || !sqCls) return;
+    const classList = Array.from(el.classList || []);
+    let piece = null;
+    let fi = -1, ri = -1;
 
-    const sq = sqCls.slice(7);
-    let fi, ri;
-    if (/^\d{2}$/.test(sq)) {
-      fi = parseInt(sq[0]) - 1;
-      ri = parseInt(sq[1]) - 1;
-    } else if (/^[a-h][1-8]$/.test(sq)) {
-      fi = sq.charCodeAt(0) - 97;
-      ri = parseInt(sq[1]) - 1;
-    } else return;
+    // 1. Detect piece type and color
+    // Method A: Chess.com style (wp, bp, etc.)
+    const caPiece = classList.find(c => PIECE_MAP[c]);
+    if (caPiece) {
+      piece = PIECE_MAP[caPiece];
+    } else {
+      // Method B: Lichess style (white pawn, black knight, etc.)
+      const isWhite = classList.includes('white');
+      const isBlack = classList.includes('black');
+      if (isWhite || isBlack) {
+        const type = classList.find(c => ['pawn', 'knight', 'bishop', 'rook', 'queen', 'king'].includes(c));
+        if (type) {
+          const charMap = { pawn: 'p', knight: 'n', bishop: 'b', rook: 'r', queen: 'q', king: 'k' };
+          const pChar = charMap[type];
+          piece = isWhite ? pChar.toUpperCase() : pChar.toLowerCase();
+        }
+      }
+    }
+
+    if (!piece) return;
+
+    // 2. Detect square coordinate
+    // Method A: Chess.com style (square-12, square-a1)
+    const sqCls = classList.find(c => c.startsWith('square-'));
+    if (sqCls) {
+      const sq = sqCls.slice(7);
+      if (/^\d{2}$/.test(sq)) {
+        fi = parseInt(sq[0]) - 1;
+        ri = parseInt(sq[1]) - 1;
+      } else if (/^[a-h][1-8]$/.test(sq)) {
+        fi = sq.charCodeAt(0) - 97;
+        ri = parseInt(sq[1]) - 1;
+      }
+    } else {
+      // Method B: Lichess style (cg-key attribute)
+      const cgKey = el.getAttribute('cg-key');
+      if (cgKey && /^[a-h][1-8]$/.test(cgKey)) {
+        fi = cgKey.charCodeAt(0) - 97;
+        ri = parseInt(cgKey[1]) - 1;
+      }
+    }
 
     if (fi < 0 || fi > 7 || ri < 0 || ri > 7) return;
-    grid[7 - ri][fi] = PIECE_MAP[piece];
+
+    grid[7 - ri][fi] = piece;
     placed++;
   });
 

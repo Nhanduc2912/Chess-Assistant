@@ -9,8 +9,8 @@
     "storage"
   ],
   "host_permissions": [
-    "https://www.chess.com/*",
-    "https://lichess.org/*",
+    "https://*.chess.com/*",
+    "https://*.lichess.org/*",
     "http://localhost:5000/*"
   ],
   "action": {
@@ -24,7 +24,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.chess.com/*", "https://lichess.org/*"],
+      "matches": ["https://*.chess.com/*", "https://*.lichess.org/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
     }
