@@ -49,7 +49,7 @@ chmod +x setup_linux.sh
 bash setup_linux.sh
 
 # 3. Khởi chạy
-bash START_HERE.sh
+bash RunQuick_Linux/START_HERE.sh
 ```
 
 ### 🪟 Windows 10 / 11
@@ -63,7 +63,7 @@ cd Chess-Assistant\ChessAssistantRoot
 .\setup_windows.ps1
 
 # 3. Khởi chạy
-.\START_HERE.bat
+.\RunQuick_Windows\START_HERE.bat
 ```
 
 > 💡 **Sau khi backend đang chạy** (hiện `http://localhost:5000` trên terminal), tiếp tục bước cài Chrome Extension bên dưới.
@@ -170,7 +170,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 cd Chess-Assistant/ChessAssistantRoot
 
 # Chạy Backend + auto-detect Stockfish path:
-bash START_HERE.sh
+bash RunQuick_Linux/START_HERE.sh
 ```
 
 Hoặc khởi chạy thủ công:
@@ -183,7 +183,7 @@ dotnet run
 
 ```bat
 REM Double-click hoặc chạy trong CMD:
-START_HERE.bat
+.\RunQuick_Windows\START_HERE.bat
 ```
 
 Hoặc khởi chạy thủ công:
@@ -315,10 +315,18 @@ ChessAssistantRoot/
 │   ├── fen_converter.py    #    Piece recognition
 │   └── requirements.txt
 │
+├── RunQuick_Linux/         # 🐧 Thư mục khởi chạy nhanh Linux
+│   ├── START_HERE.sh       #    Khởi chạy Backend độc lập (chỉ cần backend cho Chrome Extension)
+│   ├── start_assistant.sh  #    Khởi chạy toàn bộ hệ thống (Backend, UI, Vision)
+│   ├── start_mock_assistant.sh # Khởi chạy hệ thống ở chế độ giả lập
+│   └── stop_assistant.sh   #    Dừng toàn bộ hệ thống
+├── RunQuick_Windows/       # 🪟 Thư mục khởi chạy nhanh Windows
+│   ├── START_HERE.bat      #    Khởi chạy Backend độc lập
+│   ├── start_assistant.bat #    Khởi chạy toàn bộ hệ thống
+│   ├── start_mock_assistant.bat # Khởi chạy hệ thống ở chế độ giả lập
+│   └── stop_assistant.bat  #    Dừng toàn bộ hệ thống
 ├── setup_linux.sh          # 🛠️ Auto-setup: Ubuntu/Debian/Arch/Fedora...
-├── setup_windows.ps1       # 🛠️ Auto-setup: Windows 10/11
-├── START_HERE.sh           # 🚀 Quick start (Linux)
-└── START_HERE.bat          # 🚀 Quick start (Windows)
+└── setup_windows.ps1       # 🛠️ Auto-setup: Windows 10/11
 ```
 
 ---
