@@ -166,7 +166,9 @@ function isUserTurn()     { return getActiveColor() === getUserColor(); }
 function checkNewGame(ply) {
   if (lastPlyCount > 4 && ply === 0) {
     lastFen = ''; lastDrawnFen = ''; lastPlyCount = 0; lastSentOk = true;
-    fetch(RESET_URL, { method: 'POST' }).catch(() => {});
+    if (ctxOk()) {
+      chrome.runtime.sendMessage({ type: 'RESET_REQUEST' }).catch(() => {});
+    }
     clearArrows();
     return true;
   }
@@ -269,21 +271,34 @@ function getBoardBbox() {
 async function sendFen(fen, isWhiteBottom) {
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
-      const resp = await fetch(BACKEND_URL, {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ fen, bbox: getBoardBbox(), isWhiteBottom }),
-        signal: AbortSignal.timeout(6000) // Increased timeout for Stockfish
+      // Use background script as a proxy to bypass CORS, CSP, and Mixed Content restrictions
+      const response = await new Promise((resolve, reject) => {
+        if (!ctxOk()) { reject(new Error('Extension context invalidated')); return; }
+        chrome.runtime.sendMessage({
+          type: 'ANALYZE_REQUEST',
+          fen,
+          bbox: getBoardBbox(),
+          isWhiteBottom
+        }, res => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else {
+            resolve(res);
+          }
+        });
       });
-      
-      if (resp.status === 429) {
+
+      if (response.status === 429) {
         await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
         continue;
       }
-      
-      if (!resp.ok) return;
-      
-      const data = await resp.json();
+
+      if (response.error) {
+        console.error('[CA] Proxy analysis error:', response.error);
+        return;
+      }
+
+      const data = response.data;
       if (!data?.bestMoves?.length) return;
 
       // Draw immediately
@@ -398,9 +413,19 @@ async function pollAndDraw() {
   if (!isEnabled || !ctxOk()) return;
 
   try {
-    const resp = await fetch(LATEST_URL, { signal: AbortSignal.timeout(1000) });
-    if (resp.status === 204 || !resp.ok) return;
-    const data = await resp.json();
+    const response = await new Promise((resolve, reject) => {
+      if (!ctxOk()) { reject(new Error('Extension context invalidated')); return; }
+      chrome.runtime.sendMessage({ type: 'LATEST_REQUEST' }, res => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else {
+          resolve(res);
+        }
+      });
+    });
+
+    if (response.status === 204 || response.error || !response.data) return;
+    const data = response.data;
     if (!data?.bestMoves?.length) return;
 
     // Only draw arrows when the analysis is for the USER's color
