@@ -18,9 +18,9 @@ cd "$SCRIPT_DIR"
 
 # Clean old processes safely
 echo -e "\e[1;34m[1/3] Stopping old processes...\e[0m"
-pkill -f "dotnet run.*brain-backend" >/dev/null 2>&1
-pkill -f "brain-backend.*dll" >/dev/null 2>&1
-pkill -f "stockfish" >/dev/null 2>&1
+pkill -fi "brainbackend" >/dev/null 2>&1
+pkill -fi "brain-backend" >/dev/null 2>&1
+pkill -fi "stockfish" >/dev/null 2>&1
 sleep 1
 
 # Detect Stockfish on Arch Linux

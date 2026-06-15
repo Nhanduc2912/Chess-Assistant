@@ -34,12 +34,12 @@ echo -e "\e[1;34mCleaning up any leftover processes...\e[0m"
 
 # Stop Brain Backend
 echo -e "  Stopping Brain Backend (dotnet)..."
-pkill -f "dotnet run.*brain-backend" >/dev/null 2>&1
-pkill -f "brain-backend.*dll" >/dev/null 2>&1
+pkill -fi "brainbackend" >/dev/null 2>&1
+pkill -fi "brain-backend" >/dev/null 2>&1
 
 # Stop Stockfish
 echo -e "  Stopping Stockfish engine..."
-pkill -f "stockfish" >/dev/null 2>&1
+pkill -fi "stockfish" >/dev/null 2>&1
 
 # Stop Overlay UI & Electron
 echo -e "  Stopping Overlay UI (node & electron)..."

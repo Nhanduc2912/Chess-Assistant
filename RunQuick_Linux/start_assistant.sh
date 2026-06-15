@@ -82,9 +82,9 @@ export Stockfish__EnginePath="$STOCKFISH_PATH"
 
 # 3. Clean old processes
 echo -e "\e[1;34m[3/4] Cleaning up any stray assistant processes...\e[0m"
-pkill -f "dotnet run.*brain-backend" >/dev/null 2>&1
-pkill -f "brain-backend.*dll" >/dev/null 2>&1
-pkill -f "stockfish" >/dev/null 2>&1
+pkill -fi "brainbackend" >/dev/null 2>&1
+pkill -fi "brain-backend" >/dev/null 2>&1
+pkill -fi "stockfish" >/dev/null 2>&1
 pkill -f "node.*overlay-ui" >/dev/null 2>&1
 pkill -f "electron.*overlay-ui" >/dev/null 2>&1
 pkill -f "python.*main.py" >/dev/null 2>&1
@@ -156,9 +156,9 @@ cleanup() {
     kill $VISION_PID >/dev/null 2>&1
     
     # Extra cleanup to ensure no processes are orphaned
-    pkill -f "dotnet run.*brain-backend" >/dev/null 2>&1
-    pkill -f "brain-backend.*dll" >/dev/null 2>&1
-    pkill -f "stockfish" >/dev/null 2>&1
+    pkill -fi "brainbackend" >/dev/null 2>&1
+    pkill -fi "brain-backend" >/dev/null 2>&1
+    pkill -fi "stockfish" >/dev/null 2>&1
     pkill -f "node.*overlay-ui" >/dev/null 2>&1
     pkill -f "electron.*overlay-ui" >/dev/null 2>&1
     pkill -f "python.*main.py" >/dev/null 2>&1
