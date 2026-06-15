@@ -3,7 +3,7 @@ echo ===================================================
 echo CHESS REALTIME ASSISTANT v2.0 - MOCK STARTUP SCRIPT
 echo ===================================================
 
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 echo [1/3] Starting Brain Backend (C# ASP.NET Core)...
 start "Chess Brain Backend" cmd /k "cd brain-backend && dotnet run"

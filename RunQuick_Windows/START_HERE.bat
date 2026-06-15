@@ -3,7 +3,7 @@ echo ===================================================
 echo  CHESS REALTIME ASSISTANT v2.0
 echo ===================================================
 
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 echo [1/2] Stopping old processes...
 taskkill /F /IM dotnet.exe /T 2>nul
