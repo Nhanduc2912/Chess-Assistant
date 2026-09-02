@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 #  Chess Realtime Assistant — Windows Setup Script
 #  Chạy bằng PowerShell với quyền Administrator
 # =============================================================================
@@ -72,11 +72,12 @@ $dotnetCmd = Get-Command dotnet -ErrorAction SilentlyContinue
 $needDotnet = $true
 
 if ($dotnetCmd) {
-    $dotnetVer = & dotnet --version 2>$null
-    if ($dotnetVer -match "^9\.") {
-        Write-OK ".NET 9 đã cài đặt: $dotnetVer"
+    $dotnetSdks = & dotnet --list-sdks 2>$null
+    if ($dotnetSdks -match "(?m)^9\.") {
+        Write-OK ".NET 9 đã cài đặt."
         $needDotnet = $false
     } else {
+        $dotnetVer = & dotnet --version 2>$null
         Write-WARN ".NET version hiện tại: $dotnetVer (cần 9.x)"
     }
 }
@@ -168,7 +169,7 @@ Set-Location $ScriptDir
 Write-Step "5/5 — Hoàn tất"
 
 $checks = @(
-    @{ Name = ".NET 9";     OK = (Get-Command dotnet -EA SilentlyContinue) -and ((& dotnet --version) -match "^9\.") },
+    @{ Name = ".NET 9";     OK = (Get-Command dotnet -EA SilentlyContinue) -and ((& dotnet --list-sdks) -match "(?m)^9\.") },
     @{ Name = "Stockfish";  OK = Test-Path $stockfishExe }
 )
 
